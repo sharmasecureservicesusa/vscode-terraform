@@ -111,6 +111,7 @@ export class LanguageServerInstaller {
 				// No matching build found
 				return Promise.reject();
 			}
+			this.removeOldBin(installDir, platform);
 		}
 
 		return new Promise<void>((resolve, reject) => {
@@ -139,6 +140,14 @@ export class LanguageServerInstaller {
 				return reject(err);
 			});
 		});
+	}
+
+	removeOldBin(directory: string, platform: string) {
+		if (platform === "windows") {
+			fs.unlinkSync(`${directory}/terraform-ls.exe`);
+		} else {
+			fs.unlinkSync(`${directory}/terraform-ls`);
+		}
 	}
 
 	download(downloadUrl: string, installPath: string, identifier: string) {
@@ -171,11 +180,7 @@ export class LanguageServerInstaller {
 	unpack(directory: string, pkgName: string) {
 		return new Promise<void>((resolve, reject) => {
 			let executable: string;
-			if (fs.existsSync(`${directory}/terraform-ls`)) {
-				fs.unlinkSync(`${directory}/terraform-ls`);
-			} else if (fs.existsSync(`${directory}/terraform-ls.exe`)) {
-				fs.unlinkSync(`${directory}/terraform-ls.exe`);
-			}
+
 			yauzl.open(pkgName, { lazyEntries: true }, (err, zipfile) => {
 				if (err) {
 					return reject(err);
