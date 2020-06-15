@@ -16,6 +16,7 @@ const https = require("https");
 const os = require("os");
 const semver = require("semver");
 const yauzl = require("yauzl");
+const releasesUrl = "https://releases.hashicorp.com/terraform-ls";
 class LanguageServerInstaller {
     install(directory) {
         return __awaiter(this, void 0, void 0, function* () {
@@ -52,6 +53,7 @@ class LanguageServerInstaller {
                                             console.log(`LS installed to ${directory}`);
                                             return resolve();
                                         }).catch((err) => {
+                                            vscode.window.showErrorMessage("Unable to complete terraform-ls install");
                                             return reject(err);
                                         });
                                     }
@@ -75,10 +77,9 @@ class LanguageServerInstaller {
         });
     }
     checkCurrent(identifier) {
-        const releasesUrl = "https://releases.hashicorp.com/terraform-ls/index.json";
         const headers = { 'User-Agent': identifier };
         return new Promise((resolve, reject) => {
-            const request = https.request(releasesUrl, { headers: headers }, (response) => {
+            const request = https.request(`${releasesUrl}/index.json`, { headers: headers }, (response) => {
                 if (response.statusCode !== 200) {
                     return reject(response.statusMessage);
                 }
@@ -102,9 +103,9 @@ class LanguageServerInstaller {
         });
     }
     installPkg(installDir, release, identifer, downloadUrl) {
+        let platform = os.platform().toString();
         if (!downloadUrl) {
             let arch = os.arch();
-            let platform = os.platform().toString();
             switch (arch) {
                 case 'x64':
                     arch = 'amd64';
@@ -121,7 +122,12 @@ class LanguageServerInstaller {
                 // No matching build found
                 return Promise.reject();
             }
-            this.removeOldBin(installDir, platform);
+            try {
+                this.removeOldBin(installDir, platform);
+            }
+            catch (_a) {
+                // ignore
+            }
         }
         return new Promise((resolve, reject) => {
             vscode.window.withProgress({
@@ -135,16 +141,19 @@ class LanguageServerInstaller {
                 progress.report({ increment: 10 });
                 return new Promise((resolve, reject) => {
                     this.download(downloadUrl, `${installDir}/terraform-ls_v${release.version}.zip`, identifer).then((pkgName) => {
-                        progress.report({ increment: 50 });
-                        return resolve(this.unpack(installDir, pkgName));
-                    }).catch((err) => {
-                        return reject(err);
+                        progress.report({ increment: 30 });
+                        this.unpack(installDir, pkgName).then(() => {
+                            return resolve();
+                        }).catch((err) => {
+                            return reject(err);
+                        });
                     });
+                }).then(() => {
+                    return resolve();
+                }, (err) => {
+                    this.removeOldBin(installDir, platform);
+                    return reject(err);
                 });
-            }).then(() => {
-                return resolve();
-            }, (err) => {
-                return reject(err);
             });
         });
     }

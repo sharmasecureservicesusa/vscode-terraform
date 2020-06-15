@@ -7,7 +7,9 @@ import * as os from 'os';
 import * as semver from 'semver';
 import * as yauzl from 'yauzl';
 
-export class LanguageServerInstaller {
+const releasesUrl = "https://releases.hashicorp.com/terraform-ls";
+
+export class LanguageServerInstaller {	
 	public async install(directory: string) {
 		return new Promise<void>((resolve, reject) => {
 			let identifer: string;
@@ -42,6 +44,7 @@ export class LanguageServerInstaller {
 										console.log(`LS installed to ${directory}`);
 										return resolve();
 									}).catch((err) => {
+										vscode.window.showErrorMessage("Unable to complete terraform-ls install");
 										return reject(err);
 									});
 								} else if (selected === 'Cancel') {
@@ -62,10 +65,9 @@ export class LanguageServerInstaller {
 	}
 
 	checkCurrent(identifier: string) {
-		const releasesUrl = "https://releases.hashicorp.com/terraform-ls/index.json";
 		const headers = { 'User-Agent': identifier };
 		return new Promise<any>((resolve, reject) => {
-			const request = https.request(releasesUrl, { headers: headers }, (response) => {
+			const request = https.request(`${releasesUrl}/index.json`, { headers: headers }, (response) => {
 				if (response.statusCode !== 200) {
 					return reject(response.statusMessage);
 				}
@@ -90,10 +92,10 @@ export class LanguageServerInstaller {
 		});
 	}
 
-	installPkg(installDir: string, release, identifer: string, downloadUrl?: string): Promise<void> {
+	installPkg(installDir: string, release: { builds: any[]; version: string; }, identifer: string, downloadUrl?: string): Promise<void> {
+		let platform = os.platform().toString();
 		if (!downloadUrl) {
 			let arch = os.arch();
-			let platform = os.platform().toString();
 
 			switch (arch) {
 				case 'x64':
@@ -106,15 +108,20 @@ export class LanguageServerInstaller {
 			if (platform === 'win32') {
 				platform = 'windows'
 			}
+
 			downloadUrl = release.builds.find(b => b.os === platform && b.arch === arch).url;
 			if (!downloadUrl) {
 				// No matching build found
 				return Promise.reject();
 			}
-			this.removeOldBin(installDir, platform);
+			try {
+				this.removeOldBin(installDir, platform);
+			} catch {
+				// ignore
+			}
 		}
 
-		return new Promise<void>((resolve, reject) => {
+		return new Promise<any>((resolve, reject) => {
 			vscode.window.withProgress({
 				cancellable: true,
 				location: vscode.ProgressLocation.Notification,
@@ -125,19 +132,22 @@ export class LanguageServerInstaller {
 				});
 
 				progress.report({ increment: 10 });
+
 				return new Promise<void>((resolve, reject) => {
-					this.download(downloadUrl, `${installDir}/terraform-ls_v${release.version}.zip`, identifer).then((pkgName) => {
-						progress.report({ increment: 50 });
-						return resolve(this.unpack(installDir, pkgName));
-					}).catch((err) => {
-						return reject(err);
+					this.download(downloadUrl, `${installDir}/terraform-ls_v${release.version}.zip`, identifer).then((pkgName: string) => {
+						progress.report({ increment: 30 });
+						this.unpack(installDir, pkgName).then(() => {
+							return resolve();
+						}).catch((err) => {
+							return reject(err);
+						});
 					});
+				}).then(() => {
+					return resolve();
+				}, (err) => {
+					this.removeOldBin(installDir, platform)
+					return reject(err);
 				});
-			}).then(() => {
-				return resolve();
-			},
-			(err) => {
-				return reject(err);
 			});
 		});
 	}
@@ -180,7 +190,6 @@ export class LanguageServerInstaller {
 	unpack(directory: string, pkgName: string) {
 		return new Promise<void>((resolve, reject) => {
 			let executable: string;
-
 			yauzl.open(pkgName, { lazyEntries: true }, (err, zipfile) => {
 				if (err) {
 					return reject(err);
